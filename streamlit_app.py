@@ -58,8 +58,8 @@ for date in rebalance_dates:
         exit_date = monthly_prices.index[exit_idx]
         exit_prices = monthly_prices.loc[exit_date, top_stocks.index]
 
-        # Long returns
         long_returns = (exit_prices - entry_prices) / entry_prices
+        position_marks = pd.Series(0, index=monthly_prices.columns)
 
         if short_bottom:
             bottom_stocks = past_returns.nsmallest(top_n)
@@ -67,8 +67,12 @@ for date in rebalance_dates:
             short_exit = monthly_prices.loc[exit_date, bottom_stocks.index]
             short_returns = (short_entry - short_exit) / short_entry
             net_returns = pd.concat([long_returns, short_returns]) - transaction_cost
+
+            position_marks[top_stocks.index] = 1
+            position_marks[bottom_stocks.index] = -1
         else:
             net_returns = long_returns - transaction_cost
+            position_marks[top_stocks.index] = 1
 
         avg_return = net_returns.mean()
         portfolio_value *= (1 + avg_return)
@@ -81,7 +85,7 @@ for date in rebalance_dates:
         portfolio_values.append(portfolio_value)
         spy_values.append(spy_value)
         monthly_returns.append(avg_return)
-        selection_matrix.loc[date, top_stocks.index] = 1
+        selection_matrix.loc[date] = position_marks
 
         rebalance_log.append({
             'Rebalance Date': date.strftime('%Y-%m-%d'),
@@ -128,11 +132,17 @@ st.dataframe(pd.DataFrame(rebalance_log).tail())
 st.subheader("📈 Strategy vs SPY")
 st.line_chart(result_df[['Portfolio Value', 'SPY Value']])
 
-st.subheader("📊 Stock Selection Heatmap")
+st.subheader("📊 Stock Selection Heatmap (Blue = Long, Red = Short)")
 fig, ax = plt.subplots(figsize=(14, 8))
 heatmap_data = selection_matrix.loc[rebalance_dates[:len(portfolio_values)]].T
 heatmap_data.columns = heatmap_data.columns.strftime('%Y-%m')
-sns.heatmap(heatmap_data, cmap='YlGnBu', cbar=True, ax=ax)
+sns.heatmap(
+    heatmap_data,
+    cmap=sns.color_palette(["red", "white", "blue"], as_cmap=True),
+    center=0,
+    cbar=True,
+    ax=ax
+)
 st.pyplot(fig)
 
 # --- Rolling Sharpe Ratio ---
