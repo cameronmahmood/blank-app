@@ -18,6 +18,9 @@ top_n = 5
 transaction_cost = 0.002
 risk_free_rate = 0.02 / 12
 
+# --- Add checkbox to short bottom stocks ---
+short_bottom = st.checkbox("🔻 Short Bottom 20% Stocks?", value=False)
+
 main_tickers = ['AAPL', 'MSFT', 'TSLA', 'GOOGL', 'NVDA', 'META', 'AMZN', 'NFLX', 'JPM', 'UNH',
                 'V', 'MA', 'HD', 'BAC', 'XOM', 'WMT', 'PEP', 'KO', 'CSCO', 'INTC']
 
@@ -46,36 +49,44 @@ rebalance_dates = momentum.dropna().index
 for date in rebalance_dates:
     try:
         past_returns = momentum.loc[date].drop('SPY')
-        top_stocks = list(past_returns.nlargest(top_n).index)
+        top_stocks = past_returns.nlargest(top_n)
+        entry_prices = monthly_prices.loc[date, top_stocks.index]
 
-        entry_prices = monthly_prices.loc[date, top_stocks]
         exit_idx = monthly_prices.index.get_loc(date) + holding_period_months
         if exit_idx >= len(monthly_prices.index):
             break
         exit_date = monthly_prices.index[exit_idx]
-        exit_prices = monthly_prices.loc[exit_date, top_stocks]
+        exit_prices = monthly_prices.loc[exit_date, top_stocks.index]
+
+        # Long returns
+        long_returns = (exit_prices - entry_prices) / entry_prices
+
+        if short_bottom:
+            bottom_stocks = past_returns.nsmallest(top_n)
+            short_entry = monthly_prices.loc[date, bottom_stocks.index]
+            short_exit = monthly_prices.loc[exit_date, bottom_stocks.index]
+            short_returns = (short_entry - short_exit) / short_entry
+            net_returns = pd.concat([long_returns, short_returns]) - transaction_cost
+        else:
+            net_returns = long_returns - transaction_cost
+
+        avg_return = net_returns.mean()
+        portfolio_value *= (1 + avg_return)
 
         spy_entry = monthly_prices.loc[date, 'SPY']
         spy_exit = monthly_prices.loc[exit_date, 'SPY']
         spy_return = (spy_exit - spy_entry) / spy_entry
-
-        gross_returns = (exit_prices - entry_prices) / entry_prices
-        net_returns = gross_returns - transaction_cost
-        avg_return = net_returns.mean()
-
-        portfolio_value *= (1 + avg_return)
         spy_value = spy_values[-1] * (1 + spy_return) if spy_values else 1000
 
         portfolio_values.append(portfolio_value)
         spy_values.append(spy_value)
         monthly_returns.append(avg_return)
-
-        selection_matrix.loc[date, top_stocks] = 1
+        selection_matrix.loc[date, top_stocks.index] = 1
 
         rebalance_log.append({
             'Rebalance Date': date.strftime('%Y-%m-%d'),
             'Exit Date': exit_date.strftime('%Y-%m-%d'),
-            'Top Stocks': ', '.join(top_stocks),
+            'Top Stocks': ', '.join(top_stocks.index),
             'Monthly Return (%)': round(avg_return * 100, 2)
         })
 
@@ -131,4 +142,3 @@ rolling_sharpe = (
     returns.rolling(window=12).std()
 ) * np.sqrt(12)
 st.line_chart(rolling_sharpe)
-
